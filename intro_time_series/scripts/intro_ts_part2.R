@@ -19,8 +19,15 @@ gdppc %>%
 fit <- gdppc %>%
   model(trend_model = TSLM(GDP_per_capita ~ trend()))
 
+## if we ran general model i.e., lm(gdp per capita ~ trend) would take all countries
+## when we run above, we can see that it does it for each country - all 263
+## this is because of the 'key' feature
+## CROSTON model good for counts
+## VAR model is good for multivariate
+## look at the FABLE package in help page to determine models accepted in model() function
+
 fit
-glance(fit)
+glance(fit) #gives all the information for each of these models
 
 fit %>%
   filter(Country == "Ireland") %>%
@@ -32,6 +39,7 @@ fit %>%
 
 ## Forecast
 fit %>% forecast(h = "3 years")
+# h is going to tell you the forecast window
 
 fit %>%
   filter(Country == "Ireland") %>%
@@ -68,11 +76,21 @@ house_reg %>%
   forecast(h = "3 years") %>%
   autoplot(house_reg, level = NULL) + theme_bw()
 
+house_reg %>%
+      model(MEAN(Registrations)) %>%
+      forecast(h = "3 years") %>%
+      autoplot(house_reg) + theme_bw()
+
 ## Naive method
 house_reg %>%
   model(NAIVE(Registrations)) %>%
   forecast(h = "3 years") %>%
   autoplot(house_reg, level = NULL) + theme_bw()
+
+house_reg %>%
+      model(NAIVE(Registrations)) %>%
+      forecast(h = "3 years") %>%
+      autoplot(house_reg) + theme_bw()
 
 ## Seasonal naive method
 house_reg %>%
@@ -80,11 +98,21 @@ house_reg %>%
   forecast(h = "3 years") %>%
   autoplot(house_reg, level = NULL) + theme_bw()
 
+house_reg %>%
+      model(SNAIVE(Registrations)) %>%
+      forecast(h = "3 years") %>%
+      autoplot(house_reg) + theme_bw()
+
 ## Drift method
 house_reg %>%
   model(RW(Registrations ~ drift())) %>%
   forecast(h = "3 years") %>%
   autoplot(house_reg, level = NULL) + theme_bw()
+
+house_reg %>%
+      model(RW(Registrations ~ drift())) %>%
+      forecast(h = "3 years") %>%
+      autoplot(house_reg) + theme_bw()
 
 ## Comparing methods -- example 1: beer production
 autoplot(aus_production)
@@ -123,18 +151,24 @@ google_stock <- gafa_stock %>%
   filter(Symbol == "GOOG", year(Date) >= 2015) %>%
   dplyr::mutate(day = row_number()) %>%
   update_tsibble(index = day, regular = TRUE)
+
 ## Filter the year of interest
 google_2015 <- google_stock %>% filter(year(Date) == 2015)
+
 # Fit the models
 google_fit <- google_2015 %>%
   model(Mean = MEAN(Close),
         `Naïve` = NAIVE(Close),
         Drift = NAIVE(Close ~ drift()))
+
 ## Produce forecasts for the trading days in January 2016
 google_jan_2016 <- google_stock %>%
   filter(yearmonth(Date) == yearmonth("2016 Jan"))
+
 google_fc <- google_fit %>%
   forecast(new_data = google_jan_2016)
+## gives forecast 
+
 # Plot the forecasts
 google_fc %>%
   autoplot(google_2015, level = NULL) +
@@ -145,9 +179,14 @@ google_fc %>%
   guides(colour = guide_legend(title = "Forecast")) +
   theme_bw()
 
+#naive looks best, but not great
+
 aug <- google_2015 %>%
   model(NAIVE(Close)) %>%
   augment()
+
+#augment pulls residuals from NAIVE model
+#because we did no transformation, innovation residuals.. they are same as residuals
 
 autoplot(aug, .innov) +
   labs(y = "$US",
@@ -158,21 +197,37 @@ aug %>%
   geom_histogram() +
   labs(title = "Histogram of residuals")
 
+#looks to have mean of zeroish
+#need to look for correlations using acf plot
+
 aug %>%
   ACF(.innov) %>%
   autoplot() +
   labs(title = "Residuals from the naïve method")
 
+##hypothesis test for autocorrelation is dashed line.. significant at 0.05
+## is this significant autocorrelation? would say it is uncorrelated but lets check
+
 google_2015 %>%
   model(NAIVE(Close)) %>%
   gg_tsresiduals()
 
-## Portmanteau tests (Box-Pierce and Ljung-Box)
-aug %>% features(.innov, box_pierce, lag = 10, dof = 0)
-aug %>% features(.innov, ljung_box, lag = 10, dof = 0)
+## looks pretty normally distributed but could look at qqplot, shapiro wilks test
+library(hnp)
+qqnorm(aug$.innov)
+qqline(aug$.innov)
+hnp(na.omit(aug$.innov), half = FALSE, scale = TRUE,
+     paint = TRUE, print = TRUE)
 
-## (Hyndman et al., 2021): use l = 10 (non-seasonal) or l = 2 * m (seasonal)
-## iffy for l > T / 5
+## heavy tails...not the best model - indication that this can be approved
+
+## Portmanteau tests (Box-Pierce and Ljung-Box)
+## (Hyndman et al., 2021): use l = 10 (for non-seasonal) or l = 2 * m (for seasonal where m = seasonal periods)
+## iffy for l > T / 5 - if lag is bigger than sample size divided by 5, then test is questionable
+aug %>% features(.innov, box_pierce, lag = 10, dof = 0)
+#null is that series uncorrelated, ie series in not autocorrelated
+aug %>% features(.innov, ljung_box, lag = 10, dof = 0)
+#null is that series uncorrelated, ie series in not autocorrelated
 
 fit <- google_2015 %>% model(RW(Close ~ drift()))
 tidy(fit)
@@ -198,6 +253,8 @@ fit <- google_2015 %>%
 
 sim <- fit %>% generate(h = 3, times = 5, bootstrap = TRUE)
 sim
+#bootstrap true to sample from residuals, bootstrap false to sample from distribution
+#but we know not normal distributed so set TRUE
 
 sim <- fit %>% generate(h = 30, times = 5, bootstrap = TRUE)
 
@@ -225,7 +282,7 @@ us_retail_employment <- us_employment %>%
 dcmp <- us_retail_employment %>%
   model(STL(Employed ~ trend(window = 7), robust = TRUE)) %>%
   components() %>%
-  select(-.model)
+  dplyr::select(-.model)
 
 dcmp %>%
   model(NAIVE(season_adjust)) %>%
@@ -249,6 +306,9 @@ fit_dcmp %>%
        title = "US retail employment")
 
 fit_dcmp %>% gg_tsresiduals()
+#this is definitely autocorrelated
+#not normal - skewed to the left
+#overall, terrible model...
 
 ## Evaluating forecast accuracy
 recent_production <- aus_production %>%

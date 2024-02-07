@@ -126,6 +126,8 @@ new_co2 %>%
   gg_season(value, period = "year") +
   ylab("CO2 concentration (ppm)")
 
+#MAKES ME THINK OF PLOTTING FOR MAP
+
 ## lag plots -- helpful to uncover seasonal patterns
 new_co2 %>%
   mutate(month = month(index),
