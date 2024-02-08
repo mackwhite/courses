@@ -244,6 +244,9 @@ us_change %>%
 fit <- us_change %>%
   model(ARIMA(Consumption ~ Income))
 
+fit_slice <- vic_elec_daily|> 
+      slice()
+
 report(fit)
 
 ## write down model equations
