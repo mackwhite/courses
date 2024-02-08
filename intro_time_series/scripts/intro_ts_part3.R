@@ -351,3 +351,7 @@ forecast(fit, vic_elec_future) %>%
   labs(title = "Daily electricity demand: Victoria",
        y = "GW")
 
+
+# GAMs --------------------------------------------------------------------
+library(gratia)
+library(mgcv)
