@@ -12,16 +12,26 @@ google_stock <- gafa_stock %>%
 google_2015 <- google_stock %>% filter(year(Date) == 2015)
 
 google_2015 %>%
-  mutate(diff_close = difference(Close)) %>%
-  features(diff_close, ljung_box, lag = 10)
+  features(Close, ljung_box, lag = 10)
+
+autoplot(ACF(google_2015, Close))
+
+google_2015 %>%
+      mutate(diff_close = difference(Close, lag = 1)) %>%
+      features(diff_close, ljung_box, lag = 10)
+
+google_2015 %>%
+      mutate(diff_close = difference(Close, lag = 1)) %>%
+      ACF(diff_close) |> 
+      autoplot()
 
 ## KPSS test
 google_2015 %>%
-  features(Close, unitroot_kpss)
+  features(Close, unitroot_kpss) #significant, means nonstationary
 
 google_2015 %>%
   mutate(diff_close = difference(Close)) %>%
-  features(diff_close, unitroot_kpss)
+  features(diff_close, unitroot_kpss) #nonsignficant, means stationary with differencing
 
 ## order of an ARIMA model
 global_economy %>%
@@ -36,11 +46,18 @@ fit <- egypt_economy %>%
   model(ARIMA(Exports)) ## selects order automatically
 
 report(fit)
-## write down ARIMA equation
+## write down ARIMA (p,d,q) equation
+## selected ARIMA(2,0,1) w/ mean
+## estimated a total of 5 parameters including variance (i.e., sigma^2)
 
 fit %>% forecast(h = 10) %>%
   autoplot(global_economy) + theme_bw() +
   labs(y = "% of GDP")
+
+## need to do some checks
+fit |> gg_tsresiduals()
+# looks alright, maybe heavy tailed
+# since this is the case, should probably use bootstrapping
 
 ## ACF and pACF
 eps <- rnorm(1000)
@@ -48,15 +65,17 @@ y <- numeric(1000)
 
 ## AR(1)
 y[1] <- eps[1]
-for(i in 2:1000) y[i] <- 5 + .7*y[i-1] + eps[i]
+for(t in 2:1000) y[t] <- 5 + .7*y[t-1] + eps[t]
+plot.ts(y)
 
 par(mfrow=c(2,1))
-acf(y, lag.max = 20)
-pacf(y, lag.max = 20)
+acf(y, lag.max = 20) #decaying exponentially, because AR can be modeled as infinity
+pacf(y, lag.max = 20) #significant spike a 1, indicating lag of 1
 
 ## AR(2)
 y[1:2] <- eps[1:2]
-for(i in 3:1000) y[i] <- 5 + .3*y[i-1] + .5*y[i-2] + eps[i]
+for(t in 3:1000) y[t] <- 5 + .3*y[t-1] + .5*y[t-2] + eps[t]
+plot.ts(y)
 
 par(mfrow=c(2,1))
 acf(y, lag.max = 20)
@@ -98,82 +117,54 @@ global_economy %>%
   filter(Code == "IRL") %>%
   gg_tsdisplay(difference(Exports), plot_type = "partial")
 
-caf_fit <- global_economy %>%
-  filter(Code == "IRL") %>%
-  model(arima110 = ARIMA(Exports ~ 0 + pdq(1,1,0)),
-        arima011 = ARIMA(Exports ~ 0 + pdq(0,1,1)),
-        stepwise = ARIMA(Exports),
-        search = ARIMA(Exports, stepwise = FALSE))
+irish_economy <- global_economy |> 
+      filter(Code == "IRL")
+autoplot(irish_economy, Exports)
 
-glance(caf_fit) %>%
-  arrange(AICc)
+irish_economy |> 
+      gg_tsdisplay(difference(Exports), plot_type = "partial")
+###indicating a MA1 based on ACF - arima011
+###indicating a AR1 based on pACF - arima110
+###we do not join to make a 1,1,1 based only on visualization.. have to ignore one while looking at other
 
-caf_fit %>%
+arima_fit <- irish_economy |> 
+      model(arima011 = ARIMA(Exports ~ 0 + pdq(0,1,1)),
+            arima110 = ARIMA(Exports ~ 0 + pdq(1,1,0)),
+            stepwise = ARIMA(Exports),
+            search = ARIMA(Exports, stepwise = FALSE))
+
+arima_fit #weren't far off with our specified models, given automatic model fitting in package
+glance(arima_fit) |> 
+      arrange(AICc)
+
+# caf_fit <- global_economy %>%
+#   filter(Code == "IRL") %>%
+#   model(arima110 = ARIMA(Exports ~ 0 + pdq(1,1,0)),
+#         arima011 = ARIMA(Exports ~ 0 + pdq(0,1,1)),
+#         stepwise = ARIMA(Exports),
+#         search = ARIMA(Exports, stepwise = FALSE))
+# 
+# glance(caf_fit) %>%
+#   arrange(AICc)
+
+arima_fit %>%
   dplyr::select(search) %>%
-  gg_tsresiduals()
+  gg_tsresiduals()#not perfect, but not too bade
 
-augment(caf_fit) %>%
-  filter(.model== "search") %>%
-  features(.innov, ljung_box, lag = 10, dof = 1)
+# augment(arima_fit) %>%
+#   filter(.model== "search") %>%
+#   features(.innov, ljung_box, lag = 10, dof = 1)
 
-caf_fit %>%
+arima_fit %>%
   forecast(h = 5) %>%
-  filter(.model == "search") %>%
-  autoplot(global_economy)
+      autoplot(irish_economy, level = NULL)
+
+arima_fit %>%
+      forecast(h = 5) %>%
+      filter(.model == "search") |> 
+      autoplot(irish_economy)
 
 ## Seasonal ARIMA
-leisure <- us_employment %>%
-  filter(Title == "Leisure and Hospitality",
-         year(Month) > 2000) %>%
-  mutate(Employed = Employed/1000) %>%
-  dplyr::select(Month, Employed)
-
-autoplot(leisure, Employed) + theme_bw() +
-  labs(title = "US employment: leisure and hospitality",
-       y="Number of people (millions)")
-
-leisure %>%
-  gg_tsdisplay(difference(Employed, 12),
-               plot_type='partial', lag=36) +
-  labs(title="Seasonally differenced", y="")
-
-leisure %>%
-  gg_tsdisplay(difference(Employed, 12) %>% difference(),
-               plot_type='partial', lag=36) +
-  labs(title="Seasonally differenced", y="")
-## Looking at the ACF only we might try the ARIMA(0,1,2)(0,1,1)_12 model
-## Looking at the PACF only we might try the ARIMA(2,1,0)(1,1,0)_{12}
-## We could merge and look at the PACF to model the non-seasonal part and the
-## ACF to model the seasonal part and try the ARIMA(2,1,0)(0,1,1)_{12} model
-
-fit <- leisure %>%
-  model(arima012011 = ARIMA(Employed ~ pdq(0,1,2) + PDQ(0,1,1)),
-        arima210110 = ARIMA(Employed ~ pdq(2,1,0) + PDQ(1,1,0)),
-        arima210011 = ARIMA(Employed ~ pdq(2,1,0) + PDQ(0,1,1)),
-        auto = ARIMA(Employed, stepwise = FALSE, approx = FALSE))
-
-fit %>%
-  pivot_longer(everything(),
-               names_to = "Model name",
-               values_to = "Orders")
-
-glance(fit) %>%
-  arrange(AICc) %>%
-  select(.model:BIC)
-
-fit %>%
-  select(auto) %>%
-  gg_tsresiduals(lag = 36)
-
-augment(fit) %>%
-  filter(.model == "auto") %>%
-  features(.innov, ljung_box, lag = 24, dof = 4)
-
-forecast(fit, h = 36) %>%
-  filter(.model == "auto") %>%
-  autoplot(leisure) + theme_bw() +
-  labs(title = "US employment: leisure and hospitality",
-       y = "Number of people (millions)")
 
 ## Example: corticosteroid drug sales
 h02 <- PBS %>%
@@ -196,7 +187,6 @@ h02 %>%
   gg_tsdisplay(difference(log(Cost), 12) %>% difference,
                plot_type = 'partial', lag_max = 24)
 
-
 fit <- h02 %>%
   model(arima014012 = ARIMA(log(Cost) ~ 0 + pdq(0,1,4) + PDQ(0,1,2)),
         auto = ARIMA(log(Cost)),
@@ -217,22 +207,29 @@ h02 %>%
   accuracy(h02) %>%
   arrange(RMSE)
 
+## arima210011 is chose via one-step ahead accuracy, though not chose by AICc
+## would select this one, because simpler... less total parameters
+## if you overfit, your RMSE will be very inflated - safeguard for that
+
 fit %>% 
   select(auto) %>%
-  gg_tsresiduals(lag_max = 36)
+  gg_tsresiduals(lag_max = 40)
 
 fit %>%
   select(auto) %>%
   augment %>%
-  features(.innov, ljung_box, lag = 36, dof = 6)
+  features(.innov, ljung_box, lag = 24, dof = 6) #signficant value here means that significant autocorrelation - model could be improved
+#important to note... use .innov bc log transformed the data, dof = #s in model name sum + variance
 
 fit %>%
   select(auto) %>%
-  forecast() %>%
+  forecast(h = '3 years') %>%
   autoplot(h02) +
   theme_bw() +
   labs(y = "$AU (millions)",
        title = "Corticosteroid drug scripts (H02) sales")
+
+
 
 # Dynamic regression ------------------------------------------------------
 
