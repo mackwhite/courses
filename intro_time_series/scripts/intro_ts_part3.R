@@ -229,8 +229,6 @@ fit %>%
   labs(y = "$AU (millions)",
        title = "Corticosteroid drug scripts (H02) sales")
 
-
-
 # Dynamic regression ------------------------------------------------------
 
 ## Example: US consumption and income
@@ -349,3 +347,4 @@ forecast(fit, vic_elec_future) %>%
   theme_bw() +
   labs(title = "Daily electricity demand: Victoria",
        y = "GW")
+
